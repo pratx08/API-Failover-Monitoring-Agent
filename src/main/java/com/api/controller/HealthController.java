@@ -1,5 +1,6 @@
 package com.api.controller;
 
+import com.api.config.FailureConfig;
 import com.api.metrics.ServerMetrics;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,6 +41,15 @@ public class HealthController {
         metrics.put("uptimeSeconds", uptimeMs / 1000);
         metrics.put("avgLatencyMs", ServerMetrics.getAverageLatency());
         metrics.put("recentErrors", ServerMetrics.getRecentErrorCount());
+        if (FailureConfig.artificialDelayMs > 0) {
+            metrics.put("avgLatencyMs", FailureConfig.artificialDelayMs);
+        }
+
+        if (FailureConfig.dbFailure || FailureConfig.nullPointer || FailureConfig.timeoutFailure) {
+            // Force high error count
+            metrics.put("recentErrors", ServerMetrics.getRecentErrorCount() + 5);
+            resp.put("status", "DEGRADED");
+        }
         metrics.put("requestsTracked", ServerMetrics.getTotalRequestsTracked());
 
         resp.put("status", "OK");
