@@ -22,7 +22,6 @@ public class HealthController {
         OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
         MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
 
-        // uptime
         long uptimeMs = ManagementFactory.getRuntimeMXBean().getUptime();
 
         // JVM memory
@@ -30,29 +29,37 @@ public class HealthController {
         long heapMax = memoryBean.getHeapMemoryUsage().getMax() / (1024 * 1024);
         double memoryUsedPercent = (heapUsed * 100.0) / heapMax;
 
-        // CPU Load (if supported)
+        // CPU
         double cpuLoad = 0;
         try {
             cpuLoad = (double) osBean.getClass().getMethod("getSystemCpuLoad").invoke(osBean) * 100;
         } catch (Exception ignored) {}
 
+        // Base metrics from REAL request activity
+        double avgLatency = ServerMetrics.getAverageLatency();
+        int recentErrors = ServerMetrics.getRecentErrorCount();
+        int totalRequests = ServerMetrics.getTotalRequestsTracked();
+
+        // If latency slider used, override latency
+        if (FailureConfig.artificialDelayMs > 0) {
+            avgLatency = FailureConfig.artificialDelayMs;
+        }
+
+        // If critical failures injected, increase errors
+        if (FailureConfig.dbFailure || FailureConfig.nullPointer || FailureConfig.timeoutFailure) {
+            recentErrors = recentErrors + 5;  // force degrade
+            resp.put("status", "DEGRADED");
+        } else {
+            resp.put("status", recentErrors > 0 ? "DEGRADED" : "OK");
+        }
+
         metrics.put("cpuLoadPercent", cpuLoad);
         metrics.put("memoryUsedPercent", memoryUsedPercent);
         metrics.put("uptimeSeconds", uptimeMs / 1000);
-        metrics.put("avgLatencyMs", ServerMetrics.getAverageLatency());
-        metrics.put("recentErrors", ServerMetrics.getRecentErrorCount());
-        if (FailureConfig.artificialDelayMs > 0) {
-            metrics.put("avgLatencyMs", FailureConfig.artificialDelayMs);
-        }
+        metrics.put("avgLatencyMs", avgLatency);
+        metrics.put("recentErrors", recentErrors);
+        metrics.put("requestsTracked", totalRequests);
 
-        if (FailureConfig.dbFailure || FailureConfig.nullPointer || FailureConfig.timeoutFailure) {
-            // Force high error count
-            metrics.put("recentErrors", ServerMetrics.getRecentErrorCount() + 5);
-            resp.put("status", "DEGRADED");
-        }
-        metrics.put("requestsTracked", ServerMetrics.getTotalRequestsTracked());
-
-        resp.put("status", "OK");
         resp.put("metrics", metrics);
         resp.put("timestamp", new Date().toString());
 
